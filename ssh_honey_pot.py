@@ -1,6 +1,8 @@
 # commiter : adollking
 # 22-08-2024
 
+
+import geoip2.webservice
 import logging
 from logging.handlers import RotatingFileHandler 
 import socket
@@ -10,9 +12,9 @@ import datetime
 
 
 #variables
-
-# HOST_KEY=paramiko.RSAKey.generate(filename='host.key')
-HOST_KEY = paramiko.RSAKey.generate(1024)
+#  Generate an RSA key and save it to a file
+HOST_KEY = paramiko.RSAKey.generate(2048)
+HOST_KEY.write_private_key_file('host.key')
 USER='root'
 PASSWORD='1234'
 
@@ -26,8 +28,6 @@ funner_logger.setLevel(logging.INFO)
 funner_handler = RotatingFileHandler('audit.log', maxBytes=20000, backupCount=5)
 funner_handler.setFormatter(logging_format)
 funner_logger.addHandler(funner_handler)
-
-
 
 cmd_logger = logging.getLogger('cmdLogger')
 cmd_logger.setLevel(logging.INFO)
@@ -78,12 +78,13 @@ def emulate_shell(channel, client_ip,address,username):
                 response = b'\n' + b'Available commands: whoami, ls, cat, pwd, exit '+ b'\r\n'
             else: 
                 response = b"\n" +bytes(command.strip()) + b' : command not found ' + b"\r\n"
+
             channel.send(response)
             channel.send(f'{username}@{address[0]}:~$ ')
             cmd_logger.info(f'{client_ip} - {command.strip()}')
             command = b""
-## ssh server 
 
+## ssh server 
 class Server(paramiko.ServerInterface):
 
     def __init__(self,client_ip, input_username=None, input_password=None):
@@ -101,6 +102,8 @@ class Server(paramiko.ServerInterface):
 
     def check_auth_password(self, username, password):
         funner_logger.info(f'Login from {self.client_ip} attempt: '+f'username: {username} - ' + f'pass: {password} ')
+        funner_logger.info(f'Country: {self.getCountryIp(self.client_ip)}')
+        
         if self.input_username is not None and self.input_password is not None:
             if username == self.input_username and password ==  self.input_password:
                 return paramiko.AUTH_SUCCESSFUL
@@ -120,6 +123,16 @@ class Server(paramiko.ServerInterface):
     def check_channel_exec_request(self, channel: paramiko.Channel, command: bytes) -> bool:
         command = str(command, 'utf-8')
         return True 
+    def getCountryIp(self,ip):
+        try:
+            reader = geoip2.webservice.Client(123456, '123456')
+            response = reader.city(ip)
+            return response.country.name
+        except geoip2.errors.AddressNotFoundError:
+            return "Unknown"
+        except Exception as e:
+            funner_logger.error(f'Unknown exception: {e}')
+            return "Unknown"
 
 def client_handle(client,addr,username,password):
     client_ip = addr[0]
@@ -136,8 +149,6 @@ def client_handle(client,addr,username,password):
             return 
         
         now = datetime.datetime.now().strftime("%a %b %d %H:%M:%S %Z %Y")
-
-
 
         standard_banner = "Welcome to Ubuntu 16.04.6 LTS (GNU/Linux 4.4.0-151-generic x86_64)\r\n"
 
