@@ -6,6 +6,7 @@ from logging.handlers import RotatingFileHandler
 import socket
 import paramiko
 import threading
+import datetime 
 
 
 #variables
@@ -22,7 +23,7 @@ logging_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(m
 #log 
 funner_logger = logging.getLogger('funnerLogger')
 funner_logger.setLevel(logging.INFO)
-funner_handler = RotatingFileHandler('audit.log', maxBytes=2000, backupCount=5)
+funner_handler = RotatingFileHandler('audit.log', maxBytes=20000, backupCount=5)
 funner_handler.setFormatter(logging_format)
 funner_logger.addHandler(funner_handler)
 
@@ -30,19 +31,27 @@ funner_logger.addHandler(funner_handler)
 
 cmd_logger = logging.getLogger('cmdLogger')
 cmd_logger.setLevel(logging.INFO)
-cmd_handler = RotatingFileHandler('cmd_audit.log', maxBytes=2000, backupCount=5)
+cmd_handler = RotatingFileHandler('cmd_audit.log', maxBytes=20000, backupCount=5)
 cmd_handler.setFormatter(logging_format)
 cmd_logger.addHandler(cmd_handler)
 
 
 # Emulate a honeypot
 
-def emulate_shell(channel, client_ip):
-    channel.send(b'ssh@honeypot-local:~$ ')
+def emulate_shell(channel, client_ip,address,username):
+    # channel.send(b'ssh@honeypot-local:~$ ')
+    channel.send(f'{username}@{address[0]}:~$ ')
     command = b""
     response = b""  # Initialize the 'response' variable
     while True:
         char = channel.recv(1)
+        if char in {b'\x08', b'\x7f'}:
+            if len(command) > 0:
+                command = command[:-1]
+                # Send backspace, space, and backspace again to erase the character on the terminal
+                channel.send(b'\x08 \x08')
+            continue
+        
         channel.send(char)
         if not char:
             channel.close()
@@ -68,11 +77,9 @@ def emulate_shell(channel, client_ip):
             elif command.strip() == b'help':
                 response = b'\n' + b'Available commands: whoami, ls, cat, pwd, exit '+ b'\r\n'
             else: 
-                response = b"\n" +bytes(command.strip()) + b"\r\n"
-
-
+                response = b"\n" +bytes(command.strip()) + b' : command not found ' + b"\r\n"
             channel.send(response)
-            channel.send(b'ssh@honeypot-local:~$ ')
+            channel.send(f'{username}@{address[0]}:~$ ')
             cmd_logger.info(f'{client_ip} - {command.strip()}')
             command = b""
 ## ssh server 
@@ -127,10 +134,15 @@ def client_handle(client,addr,username,password):
         channel = transport.accept(100)
         if channel is None:
             return 
+        
+        now = datetime.datetime.now().strftime("%a %b %d %H:%M:%S %Z %Y")
+
+
 
         standard_banner = "Welcome to Ubuntu 16.04.6 LTS (GNU/Linux 4.4.0-151-generic x86_64)\r\n"
+
         channel.send(standard_banner) 
-        emulate_shell(channel, client_ip=client_ip)
+        emulate_shell(channel, client_ip=client_ip,address=addr,username=username)
     except Exception as e:
         funner_logger.error(f'Error: {e}')
         client.close()
@@ -144,7 +156,7 @@ def honeypot_server(address, port,username,password):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((address, port))
-    sock.listen(100) # port 100 
+    sock.listen(100) 
     print(f'Listening for connections on {address}:{port}')        
 
     while True:
@@ -156,5 +168,4 @@ def honeypot_server(address, port,username,password):
             print(error)
 
 
-honeypot_server('127.0.0.1',2021,'username','password')
 

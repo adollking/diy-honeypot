@@ -8,12 +8,11 @@
       pip install -r requirements.txt
    ```
 
-   change 
-   ```
-   honeypot_server('127.0.0.1',2021,'username','password')
-   ``` 
-   with your server ip and custom port , custom username and passowrd 
+   run command with your server ip and custom port , custom username and password 
 
+   ```bash 
+      python3 honey_pot.py -a 127.0.0.1 -p 2024 -u root -pw root
+   ``` 
    you can use custom key in 
    ```
    # HOST_KEY=paramiko.RSAKey.generate(filename='host.key')
