@@ -18,7 +18,6 @@ HOST_KEY.write_private_key_file('host.key')
 USER='root'
 PASSWORD='1234'
 
-
 #format logging 
 logging_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
@@ -38,51 +37,101 @@ cmd_logger.addHandler(cmd_handler)
 
 # Emulate a honeypot
 
-def emulate_shell(channel, client_ip,address,username):
-    # channel.send(b'ssh@honeypot-local:~$ ')
-    channel.send(f'{username}@{address[0]}:~$ ')
+KEY_UP = b'\x1b[A'
+KEY_DOWN = b'\x1b[B'
+KEY_RIGHT = b'\x1b[C'
+KEY_LEFT = b'\x1b[D'
+
+def emulate_shell(channel, client_ip, address, username):
+    prompt = f'{username}@{address[0]}:~$ '.encode('utf-8')
+    channel.send(prompt)
     command = b""
-    response = b""  # Initialize the 'response' variable
+    history = []  
+    history_index = -1
+    
     while True:
         char = channel.recv(1)
+        
+        # Handle backspace
         if char in {b'\x08', b'\x7f'}:
             if len(command) > 0:
                 command = command[:-1]
-                # Send backspace, space, and backspace again to erase the character on the terminal
                 channel.send(b'\x08 \x08')
             continue
         
+        # Handle escape sequences (arrow keys)
+        if char == b'\x1b':  
+            char += channel.recv(2) 
+            
+            if char == KEY_UP:
+                if history:
+                    history_index = (history_index - 1) % len(history)
+                    command = history[history_index]
+                    # Clear the current line and print the command from history
+                    channel.send(b'\r\x1b[K' + prompt + command)
+            elif char == KEY_DOWN:
+                if history:
+                    history_index = (history_index + 1) % len(history)
+                    if history_index < len(history):
+                        command = history[history_index]
+                    else:
+                        command = b""
+                    # Clear the current line and print the command from history
+                    channel.send(b'\r\x1b[K' + prompt + command)
+            elif char == KEY_RIGHT:
+                if cursor_position < len(command):
+                    cursor_position += 1
+                    channel.send(KEY_RIGHT)  # Move the cursor right
+            elif char == KEY_LEFT:
+                if cursor_position > 0:
+                    cursor_position -= 1
+                    channel.send(KEY_LEFT)  # Move the cursor left
+
+            continue
         channel.send(char)
+        
         if not char:
             channel.close()
+            break
         
         command += char
 
+        # Handle the Enter key
         if char == b'\r':
-            if command.strip() == b'exit':
-                response = b'\n Goodbye!\r\n'
-                channel.close()
-            elif command.strip() == b'whoami':
-                response = b'\n' + b'root\r\n'
-            elif command.strip() == b'ls':
-                response = b'\n' + b'pswrd.txt pswrd-backup.txt file3.txt ' + b'\r\n'
-            elif command.strip() == b'cat pswrd.txt':
-                response = b'\n' + b'admin:password\r\n'
-            elif command.strip() == b'cat pswrd-backup.txt':
-                response = b'\n' +'admin:password\r\n'
-            elif command.strip() == b'cat file3.txt':
-                response = b'\n' + b'file3 content\r\n'
-            elif command.strip() == b'pwd':
-                response = b'\n' + b'/root\r\n'
-            elif command.strip() == b'help':
-                response = b'\n' + b'Available commands: whoami, ls, cat, pwd, exit '+ b'\r\n'
-            else: 
-                response = b"\n" +bytes(command.strip()) + b' : command not found ' + b"\r\n"
+            # Add the command to history
+            if command.strip():
+                history.append(command.strip())
+                history_index = len(history)
 
+            # Process the command
+            if command.strip() == b'exit':
+                response = b'\nGoodbye!\r\n'
+                channel.send(response)
+                channel.close()
+                break
+            elif command.strip() == b'whoami':
+                response = b'\nroot\r\n'
+            elif command.strip() == b'ls':
+                response = b'\npswrd.txt pswrd-backup.txt file3.txt\r\n'
+            elif command.strip() == b'cat pswrd.txt':
+                response = b'\nadmin:password\r\n'
+            elif command.strip() == b'cat pswrd-backup.txt':
+                response = b'\nadmin:password\r\n'
+            elif command.strip() == b'cat file3.txt':
+                response = b'\nfile3 content\r\n'
+            elif command.strip() == b'pwd':
+                response = b'\n/root\r\n'
+            elif command.strip() == b'help':
+                response = b'\nAvailable commands: whoami, ls, cat, pwd, history,exit\r\n'
+            else: 
+                response = b'\n' + command.strip() + b': command not found\r\n'
+
+            # Send the response and prompt for the next command
             channel.send(response)
-            channel.send(f'{username}@{address[0]}:~$ ')
-            cmd_logger.info(f'{client_ip} - {command.strip()}')
+            channel.send(prompt)
+            cmd_logger.info(f'{client_ip} - {command.strip().decode()}')
             command = b""
+
 
 ## ssh server 
 class Server(paramiko.ServerInterface):
