@@ -1,20 +1,25 @@
 # commiter : adollking
 # 22-08-2024
 
-
-import geoip2.webservice
+# import geoip2.webservice
 import logging
 from logging.handlers import RotatingFileHandler 
 import socket
 import paramiko
 import threading
 import datetime 
+import re
+import hashlib
+import random
+import threading
+from twisted.internet import reactor
 
 
 #variables
-#  Generate an RSA key and save it to a file
-HOST_KEY = paramiko.RSAKey.generate(2048)
-HOST_KEY.write_private_key_file('host.key')
+#Generate an RSA key and save it to a file
+# HOST_KEY = paramiko.RSAKey.generate(2048)
+# HOST_KEY.write_private_key_file('host.key')
+HOST_KEY = paramiko.RSAKey(filename='host.key')
 USER='root'
 PASSWORD='1234'
 
@@ -34,13 +39,66 @@ cmd_handler = RotatingFileHandler('cmd_audit.log', maxBytes=20000, backupCount=5
 cmd_handler.setFormatter(logging_format)
 cmd_logger.addHandler(cmd_handler)
 
-
-# Emulate a honeypot
+# TODO : error show previeus command when ping is running
+# TODO : fix ctc+c when ping is running 
 
 KEY_UP = b'\x1b[A'
 KEY_DOWN = b'\x1b[B'
 KEY_RIGHT = b'\x1b[C'
 KEY_LEFT = b'\x1b[D'
+
+class command_ping:
+    def __init__(self, args, channel, client_ip):
+        self.args = args
+        self.channel = channel
+        self.client_ip = client_ip
+        self.start()
+
+    def start(self):
+        self.host = None
+        for arg in self.args:
+            if not arg.startswith(b'-'):
+                self.host = arg.strip()
+                break
+
+        if not self.host:
+            usage_lines = [
+                b'Usage: ping [-LRUbdfnqrvVaA] [-c count] [-i interval] [-w deadline]',
+                b'            [-p pattern] [-s packetsize] [-t ttl] [-I interface or address]',
+                b'            [-M mtu discovery hint] [-S sndbuf]',
+                b'            [ -T timestamp option ] [ -Q tos ] [hop1 ...] destination'
+            ]
+            for line in usage_lines:
+                self.channel.send(line + b'\r\n')
+            return
+
+        if re.match(b'^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$', self.host):
+            self.ip = self.host
+        else:
+            s = hashlib.md5(self.host).hexdigest()
+            self.ip = b'.'.join([str(int(x, 16)).encode() for x in (s[0:2], s[2:4], s[4:6], s[6:8])])
+
+        self.channel.send(b'PING ' + self.host + b' (' + self.ip + b') 56(84) bytes of data.\r\n')
+        self.count = 0
+        self.showreply()
+
+    def showreply(self):
+        ms = 40 + random.random() * 10
+        self.channel.send(
+            b'64 bytes from ' + self.host + b' (' + self.ip + b'): icmp_seq=' + str(self.count + 1).encode() +
+            b' ttl=50 time=' + f'{ms:.1f}'.encode() + b' ms\r\n'
+        )
+        self.count += 1
+        self.scheduled = threading.Timer(1, self.showreply)
+        self.scheduled.start()
+
+    def ctrl_c(self):
+        self.scheduled.cancel()
+        self.channel.send(b'--- ' + self.host + b' ping statistics ---\r\n')
+        self.channel.send(
+            f'{self.count} packets transmitted, {self.count} received, 0% packet loss, time 907ms\r\n'.encode('utf-8')
+        )
+        self.channel.send(b'rtt min/avg/max/mdev = 48.264/50.352/52.441/2.100 ms\r\n'.encode('utf-8'))
 
 def emulate_shell(channel, client_ip, address, username):
     prompt = f'{username}@{address[0]}:~$ '.encode('utf-8')
@@ -48,18 +106,30 @@ def emulate_shell(channel, client_ip, address, username):
     command = b""
     history = []  
     history_index = -1
+    active_command = None
     
     while True:
         char = channel.recv(1)
+        cursor_position = 0
         
-        # Handle backspace
+        # backspace
         if char in {b'\x08', b'\x7f'}:
             if len(command) > 0:
                 command = command[:-1]
                 channel.send(b'\x08 \x08')
             continue
+
+        # Ctrl+C
+        if char == b'\x03': 
+            if active_command:
+                active_command.ctrl_c()
+                active_command = None
+            channel.send(b'^C\r\n')
+            # Clear command buffer
+            command = bytearray()  
+            channel.send(prompt)
         
-        # Handle escape sequences (arrow keys)
+        # arrow keys
         if char == b'\x1b':  
             char += channel.recv(2) 
             
@@ -67,7 +137,6 @@ def emulate_shell(channel, client_ip, address, username):
                 if history:
                     history_index = (history_index - 1) % len(history)
                     command = history[history_index]
-                    # Clear the current line and print the command from history
                     channel.send(b'\r\x1b[K' + prompt + command)
             elif char == KEY_DOWN:
                 if history:
@@ -81,11 +150,11 @@ def emulate_shell(channel, client_ip, address, username):
             elif char == KEY_RIGHT:
                 if cursor_position < len(command):
                     cursor_position += 1
-                    channel.send(KEY_RIGHT)  # Move the cursor right
+                    channel.send(KEY_RIGHT)  
             elif char == KEY_LEFT:
                 if cursor_position > 0:
                     cursor_position -= 1
-                    channel.send(KEY_LEFT)  # Move the cursor left
+                    channel.send(KEY_LEFT) 
 
             continue
         channel.send(char)
@@ -96,16 +165,14 @@ def emulate_shell(channel, client_ip, address, username):
         
         command += char
 
-        # Handle the Enter key
         if char == b'\r':
             # Add the command to history
+            
             if command.strip():
                 history.append(command.strip())
                 history_index = len(history)
 
-            # Process the command
             if command.strip() == b'exit':
-                response = b'\nGoodbye!\r\n'
                 channel.send(response)
                 channel.close()
                 break
@@ -123,11 +190,18 @@ def emulate_shell(channel, client_ip, address, username):
                 response = b'\n/root\r\n'
             elif command.strip() == b'help':
                 response = b'\nAvailable commands: whoami, ls, cat, pwd, history,exit\r\n'
+            elif command.strip().startswith(b'ping'):
+                args = command.strip().split()
+                funner_logger.info(f'{client_ip} - {args} ')
+                command_ping(args, channel, client_ip)
             else: 
                 response = b'\n' + command.strip() + b': command not found\r\n'
 
-            # Send the response and prompt for the next command
-            channel.send(response)
+            command = bytearray()  
+            if response:
+                channel.send(response)
+# 
+                
             channel.send(prompt)
             cmd_logger.info(f'{client_ip} - {command.strip().decode()}')
             command = b""
@@ -173,14 +247,14 @@ class Server(paramiko.ServerInterface):
         command = str(command, 'utf-8')
         return True 
     def getCountryIp(self,ip):
-        try:
-            reader = geoip2.webservice.Client(123456, '123456')
-            response = reader.city(ip)
-            return response.country.name
-        except geoip2.errors.AddressNotFoundError:
-            return "Unknown"
-        except Exception as e:
-            funner_logger.error(f'Unknown exception: {e}')
+        # try:
+        #     reader = geoip2.webservice.Client(123456, '123456')
+        #     response = reader.city(ip)
+        #     return response.country.name
+        # except geoip2.errors.AddressNotFoundError:
+        #     return "Unknown"
+        # except Exception as e:
+        #     funner_logger.error(f'Unknown exception: {e}')
             return "Unknown"
 
 def client_handle(client,addr,username,password):
