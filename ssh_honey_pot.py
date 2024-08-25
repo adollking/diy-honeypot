@@ -189,7 +189,7 @@ def emulate_shell(channel, client_ip, address, username):
             elif command.strip() == b'pwd':
                 response = b'\n/root\r\n'
             elif command.strip() == b'help':
-                response = b'\nAvailable commands: whoami, ls, cat, pwd, history,exit\r\n'
+                response = b'\nAvailable commands: ping, whoami, ls, cat, pwd, history, exit\r\n'
             elif command.strip().startswith(b'ping'):
                 args = command.strip().split()
                 funner_logger.info(f'{client_ip} - {args} ')
