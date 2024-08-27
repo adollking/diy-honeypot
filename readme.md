@@ -15,6 +15,11 @@
    ``` 
    you can use custom key in 
    ```
-   # HOST_KEY=paramiko.RSAKey.generate(filename='host.key')
-   HOST_KEY = paramiko.RSAKey.generate(1024) 
+      # HOST_KEY=paramiko.RSAKey.generate(filename='host.key')
+      HOST_KEY = paramiko.RSAKey.generate(1024) 
+   ```
+
+   list command 
+   ```
+      ping, whoami, ls, cat, pwd, history, exit
    ```

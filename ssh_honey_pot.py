@@ -200,7 +200,7 @@ def emulate_shell(channel, client_ip, address, username):
             command = bytearray()  
             if response:
                 channel.send(response)
-# 
+
                 
             channel.send(prompt)
             cmd_logger.info(f'{client_ip} - {command.strip().decode()}')
@@ -247,14 +247,14 @@ class Server(paramiko.ServerInterface):
         command = str(command, 'utf-8')
         return True 
     def getCountryIp(self,ip):
-        # try:
-        #     reader = geoip2.webservice.Client(123456, '123456')
-        #     response = reader.city(ip)
-        #     return response.country.name
-        # except geoip2.errors.AddressNotFoundError:
-        #     return "Unknown"
-        # except Exception as e:
-        #     funner_logger.error(f'Unknown exception: {e}')
+        try:
+            reader = geoip2.webservice.Client(123456, '123456')
+            response = reader.city(ip)
+            return response.country.name
+        except geoip2.errors.AddressNotFoundError:
+            return "Unknown"
+        except Exception as e:
+            funner_logger.error(f'Unknown exception: {e}')
             return "Unknown"
 
 def client_handle(client,addr,username,password):
