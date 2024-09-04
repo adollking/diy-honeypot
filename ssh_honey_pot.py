@@ -1,7 +1,7 @@
 # commiter : adollking
 # 22-08-2024
 
-# import geoip2.webservice
+import geoip2.webservice
 import logging
 from logging.handlers import RotatingFileHandler 
 import socket
@@ -176,26 +176,12 @@ def emulate_shell(channel, client_ip, address, username):
                 channel.send(response)
                 channel.close()
                 break
-            elif command.strip() == b'whoami':
-                response = b'\nroot\r\n'
-            elif command.strip() == b'ls':
-                response = b'\npswrd.txt pswrd-backup.txt file3.txt\r\n'
-            elif command.strip() == b'cat pswrd.txt':
-                response = b'\nadmin:password\r\n'
-            elif command.strip() == b'cat pswrd-backup.txt':
-                response = b'\nadmin:password\r\n'
-            elif command.strip() == b'cat file3.txt':
-                response = b'\nfile3 content\r\n'
-            elif command.strip() == b'pwd':
-                response = b'\n/root\r\n'
-            elif command.strip() == b'help':
-                response = b'\nAvailable commands: ping, whoami, ls, cat, pwd, history, exit\r\n'
             elif command.strip().startswith(b'ping'):
                 args = command.strip().split()
                 funner_logger.info(f'{client_ip} - {args} ')
                 command_ping(args, channel, client_ip)
             else: 
-                response = b'\n' + command.strip() + b': command not found\r\n'
+                response = handle_command(command.strip(), channel, client_ip)
 
             command = bytearray()  
             if response:
@@ -205,6 +191,30 @@ def emulate_shell(channel, client_ip, address, username):
             channel.send(prompt)
             cmd_logger.info(f'{client_ip} - {command.strip().decode()}')
             command = b""
+
+
+# handle command 
+def handle_command(command, channel, client_ip):
+    if command == b'exit':
+        channel.close()
+    elif command == b'whoami':
+        response = b'\nroot\r\n'
+    elif command == b'ls':
+        response = b'\npswrd.txt pswrd-backup.txt file3.txt\r\n'
+    elif command == b'cat pswrd.txt':
+        response = b'\nadmin:password\r\n'
+    elif command == b'cat pswrd-backup.txt':
+        response = b'\nadmin:password\r\n'
+    elif command == b'cat file3.txt':
+        response = b'\nfile3 content\r\n'
+    elif command == b'pwd':
+        response = b'\n/root\r\n'
+    elif command == b'help':
+        response = b'\nAvailable commands: ping, whoami, ls, cat, pwd, history, exit\r\n'
+    else:
+        response = b'\n' + command + b': command not found\r\n'
+    return response
+    
 
 
 ## ssh server 
